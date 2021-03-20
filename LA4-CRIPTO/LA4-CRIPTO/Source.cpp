@@ -98,44 +98,44 @@ void encrypt_aes_ctr(unsigned char* plaintext, int text_length, AES_KEY* aesKey,
 	unsigned char iv_aux[AES_BLOCK_SIZE];
 	memcpy(iv_aux, iv, AES_BLOCK_SIZE);
 	(*ciphertext) = (unsigned char*)malloc(sizeof(unsigned char) * text_length);
-	unsigned char* ivec = (unsigned char*)malloc(sizeof(unsigned char) * AES_BLOCK_SIZE);
+	unsigned char* nonce = (unsigned char*)malloc(sizeof(unsigned char) * AES_BLOCK_SIZE);
 	int counter = 0;
-	memset(ivec, 0, AES_BLOCK_SIZE);
-	memcpy(ivec, iv, AES_BLOCK_SIZE);
+	memset(nonce, 0, AES_BLOCK_SIZE);
+	memcpy(nonce, iv, AES_BLOCK_SIZE);
 	int blckNumber = text_length / AES_BLOCK_SIZE;
 	int index = AES_BLOCK_SIZE - 1;
 	for (int i = 0; i < blckNumber; i++)
 	{
 		unsigned char outBlck[AES_BLOCK_SIZE];
-		AES_encrypt(ivec, outBlck, aesKey);
+		AES_encrypt(nonce, outBlck, aesKey);
 		for (int j = 0; j < AES_BLOCK_SIZE; j++)
 		{
 			outBlck[j] ^= plaintext[i * AES_BLOCK_SIZE + j];
 		}
 		memcpy((*ciphertext + i * AES_BLOCK_SIZE), outBlck, AES_BLOCK_SIZE);
-		if (ivec[index] < 255) {
-			ivec[index]++;
+		if (nonce[index] < 255) {
+			nonce[index]++;
 		}
 		else {
-			while (ivec[index] == 255 &&index==8) {
-				ivec[index] = 0;
+			while (nonce[index] == 255 &&index==8) {
+				nonce[index] = 0;
 				index--;
 			}
 			if (index > 8)
 			{
-				ivec[index]++;
+				nonce[index]++;
 			}
 			else
 			{
-				memset(ivec, 0, 8);
+				memset(nonce, 0, 8); //TO DO: PRNG TO REPLACE FIRST HALF OF NONCE
 			}
 		}
 		index = AES_BLOCK_SIZE - 1;
 		for (int j = 0; j < AES_BLOCK_SIZE; j++) {
-			iv[j] ^= ivec[j];
+			iv[j] ^= nonce[j];
 		}
 	}
-	free(ivec);
+	free(nonce);
 	memcpy(iv, iv_aux, AES_BLOCK_SIZE);
 
 }
@@ -222,6 +222,7 @@ void encrypt_3des(unsigned char *input,int input_length,unsigned char *userKey,i
 }
 
 int main() {
+	//I USE file.key, file.iv and text.txt as tests
 	char keyfile[20];
 	printf("Introduceti numele fisierului in care se afla cheia: ");
 	scanf("%s", keyfile);
