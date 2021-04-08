@@ -4,7 +4,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 #define _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>
-
+#include <openssl/bn.h>
 #include<stdio.h>
 #include<conio.h>
 #include<string.h>
@@ -13,11 +13,48 @@
 #include<openssl/rand.h>
 #include<openssl/aes.h>
 #include<openssl/des.h>
+#include <openssl/asn1.h>
+#include <openssl/asn1t.h>
+#include <openssl/objects.h>
 
 //Dimensiune salt,IV si cheie in octeti
 #define _KEY_BYTE_LENGTH 32
 #define _IV_BYTE_LENGTH 16
 #define _IO_ERROR 1
+typedef struct rsa_public_key_st {
+	ASN1_INTEGER* modulus;
+	ASN1_INTEGER* publicExponent;
+}RSA_PUBLIC_KEY;
+typedef struct rsa_private_key_st {
+	ASN1_INTEGER* version;
+	ASN1_INTEGER* modulus;
+	ASN1_INTEGER* publicExponent;
+	ASN1_INTEGER* privateExponent;
+	ASN1_INTEGER* prime1;
+	ASN1_INTEGER* prime2;
+	ASN1_INTEGER* exponent1;
+	ASN1_INTEGER* exponent2;
+	ASN1_INTEGER* coefficient;
+}RSA_PRIVATE_KEY;
+DECLARE_ASN1_FUNCTIONS(RSA_PUBLIC_KEY);
+ASN1_SEQUENCE(RSA_PUBLIC_KEY) = {
+	ASN1_SIMPLE(RSA_PUBLIC_KEY,modulus,ASN1_INTEGER),
+	ASN1_SIMPLE(RSA_PUBLIC_KEY,publicExponent,ASN1_INTEGER)
+}ASN1_SEQUENCE_END(RSA_PUBLIC_KEY);
+IMPLEMENT_ASN1_FUNCTIONS(RSA_PUBLIC_KEY);
+DECLARE_ASN1_FUNCTIONS(RSA_PRIVATE_KEY);
+ASN1_SEQUENCE(RSA_PRIVATE_KEY) = {
+	ASN1_SIMPLE(RSA_PRIVATE_KEY,version,ASN1_INTEGER),
+	ASN1_SIMPLE(RSA_PRIVATE_KEY,modulus,ASN1_INTEGER),
+	ASN1_SIMPLE(RSA_PRIVATE_KEY,publicExponent,ASN1_INTEGER),
+	ASN1_SIMPLE(RSA_PRIVATE_KEY,privateExponent,ASN1_INTEGER),
+	ASN1_SIMPLE(RSA_PRIVATE_KEY,prime1,ASN1_INTEGER),
+	ASN1_SIMPLE(RSA_PRIVATE_KEY,prime2,ASN1_INTEGER),
+	ASN1_SIMPLE(RSA_PRIVATE_KEY,exponent1,ASN1_INTEGER),
+	ASN1_SIMPLE(RSA_PRIVATE_KEY,exponent2,ASN1_INTEGER),
+	ASN1_SIMPLE(RSA_PRIVATE_KEY,coefficient,ASN1_INTEGER)
+}ASN1_SEQUENCE_END(RSA_PRIVATE_KEY);
+IMPLEMENT_ASN1_FUNCTIONS(RSA_PRIVATE_KEY);
 int loadKeyFromFile(char* filename, unsigned char** userkey,int&keylength)
 {
 	int length;
@@ -582,8 +619,118 @@ void bc4_decrypt() {
 	
 	
 }
+void rsa_keygen()
+{
+	BIGNUM* p, * q, * n;
+	BN_CTX* ctx;
+	ctx = BN_CTX_new();
+	p = BN_new();
+	q = BN_new();
+	n = BN_new();
+
+	//Etapa 1 : Se aleg 2 numere prime p si q
+	BN_generate_prime_ex(p, 1024, 0, nullptr, nullptr, nullptr);
+	BN_generate_prime_ex(q, 1024, 0, nullptr, nullptr, nullptr);
+	//Etapa 2: Se calculeaza modulul n = p*q;
+	BN_mul(n, p, q, ctx);
+
+	//Etapa 3: Se calculeaza Phi(n)
+	BIGNUM* unu, * pMinusUnu, * qMinusUnu,*phi;
+	unu = BN_new();
+	pMinusUnu = BN_new();
+	qMinusUnu = BN_new();
+	phi = BN_new();
+	BN_set_word(unu, 1);
+	BN_sub(pMinusUnu, p, unu);
+	BN_sub(qMinusUnu, q, unu);
+	BN_mul(phi, pMinusUnu, qMinusUnu,ctx);
+	//Etapa 4 : Se alege exponentul public
+	BIGNUM* e,*cmmdc;
+	e = BN_new();
+	cmmdc = BN_new();
+	int exp;
+	bool flag = 0;
+	do {
+		printf("Introduceti o valoare pentru exponentul public ( 1 < e < phi(n)): ");
+		scanf("%d", &exp);
+		BN_set_word(e, exp);
+		if (exp > 1 && BN_cmp(e, phi) < 0) {
+			BN_gcd(cmmdc, e, phi, ctx);
+			if (BN_is_one(cmmdc)) {
+				flag = 1;
+			}
+		}
+	} while (!flag);
+
+	//Etapa 5: Se calculeaza exponentul privat d : e*d = 1 mod phi(n)
+	BIGNUM* d;
+	d = BN_new();
+	BN_mod_inverse(d, e, phi, ctx);
+	
+	//Etapa 6: Se calculeaza dP, dQ si qInv
+	BIGNUM* dP, * dQ, * qInv;
+	BN_CTX* ctx1;
+	ctx1 = BN_CTX_new();
+	dP = BN_new();
+	dQ = BN_new();
+	qInv = BN_new();
+	BN_mod(dP, d, pMinusUnu, ctx);
+	BN_mod(dQ, d, qMinusUnu, ctx);
+	BN_mod_inverse(qInv, q, p, ctx1);
+	//Etapa 7: Se scrie informatia in fisiere rsa.pub, respectiv rsa.prv
+	auto myPublicKey = new RSA_PUBLIC_KEY();
+	myPublicKey->publicExponent = ASN1_INTEGER_new();
+	myPublicKey->modulus = ASN1_INTEGER_new();
+	BN_to_ASN1_INTEGER(n, myPublicKey->modulus);
+	BN_to_ASN1_INTEGER(e, myPublicKey->publicExponent);
+	unsigned char* pub_info, * mypub;
+	int len = i2d_RSA_PUBLIC_KEY(myPublicKey, NULL);
+	pub_info = (unsigned char*)OPENSSL_malloc(len);
+	if (pub_info == nullptr)
+		fprintf(stderr, "OpenSSL malloc Error Occur:(\n");
+	mypub = pub_info;
+
+	i2d_RSA_PUBLIC_KEY(myPublicKey, &mypub);
+	FILE *myPub = fopen("rsa.pub", "wb");
+	fwrite(pub_info, len, 1, myPub);
+	fclose(myPub);
+	auto myPrivateKey = new RSA_PRIVATE_KEY();
+	long v = 1;
+	myPrivateKey->version = ASN1_INTEGER_new();
+	myPrivateKey->modulus = ASN1_INTEGER_new();
+	myPrivateKey->publicExponent = ASN1_INTEGER_new();
+	myPrivateKey->privateExponent = ASN1_INTEGER_new();
+	myPrivateKey->prime1 = ASN1_INTEGER_new();
+	myPrivateKey->prime2 = ASN1_INTEGER_new();
+	myPrivateKey->exponent1 = ASN1_INTEGER_new();
+	myPrivateKey->exponent2 = ASN1_INTEGER_new();
+	myPrivateKey->coefficient = ASN1_INTEGER_new();
+	ASN1_INTEGER_set(myPrivateKey->version,v);
+	BN_to_ASN1_INTEGER(n, myPrivateKey->modulus);
+	BN_to_ASN1_INTEGER(e, myPrivateKey->publicExponent);
+	BN_to_ASN1_INTEGER(d, myPrivateKey->privateExponent);
+	BN_to_ASN1_INTEGER(p, myPrivateKey->prime1);
+	BN_to_ASN1_INTEGER(q, myPrivateKey->prime2);
+	BN_to_ASN1_INTEGER(dP, myPrivateKey->exponent1);
+	BN_to_ASN1_INTEGER(dQ, myPrivateKey->exponent2);
+	BN_to_ASN1_INTEGER(qInv, myPrivateKey->coefficient);
+	unsigned char* prv_info, * myprv;
+	len = i2d_RSA_PRIVATE_KEY(myPrivateKey, NULL);
+	prv_info = (unsigned char*)OPENSSL_malloc(len);
+	if (prv_info == nullptr)
+		fprintf(stderr, "OpenSSL malloc Error Occur:(\n");
+	myprv = prv_info;
+
+	i2d_RSA_PRIVATE_KEY(myPrivateKey, &myprv);
+	FILE* myPrv = fopen("rsa.prv", "wb");
+	fwrite(prv_info, len, 1, myPrv);
+	fclose(myPrv);
+	BN_free(p);
+	BN_free(q);
+
+}
 int main() {
-	char key_file[30];
+	/*char key_file[30];
 	char iv_file[30];
 	char pFile[30];
 	printf("Introduceti fisierul din care se va citi cheia: ");
@@ -617,6 +764,7 @@ int main() {
 	printf("\nTextul decriptat: ");
 	for (int i = 0; i < text_length; i++) {
 		printf("%c", plainData[i]);
-	}
+	}*/
 	//bc4_decrypt();
+	rsa_keygen();
 }
